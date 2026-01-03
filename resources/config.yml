@@ -1,0 +1,24 @@
+# DeathLogRollback Configuration v2.0
+
+max_records_per_player: 10
+
+time_format: "d/m/Y H:i:s"
+
+purge_interval: "7d"
+
+save_armor: true
+
+save_inventory: true
+
+logging:
+  webhook_enabled: false
+  webhook_url: ""
+  log_local_enabled: true
+
+messages:
+  death_recorded: "§a[DeathLog] Death registered with ID: §e{id}"
+  rollback_success: "§a[DeathLog] Inventory restored successfully (ID: {id})"
+  rollback_error: "§c[DeathLog] Could not restore inventory"
+  no_deaths: "§e[DeathLog] No death records found"
+  permission_denied: "§c[DeathLog] You don't have permission to execute this command"
+  purge_complete: "§a[DeathLog] Old death records purged successfully"

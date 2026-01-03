@@ -1,0 +1,26 @@
+name: DeathLogRollback
+main: Phoenix4041\DeathLogRollback\Loader
+version: 2.1.0
+api: 5.0.0
+author: Phoenix4041
+description: Sistema de registro y rollback de inventario al morir con IDs globales y ring buffer.
+
+commands:
+  rollback:
+    description: Abrir menú de rollback
+    usage: "/rollback o /rb"
+    aliases: ["rb"]
+    permission: deathlog.rollback
+
+permissions:
+  deathlog.view:
+    description: Permite ver el historial de muertes
+    default: op
+  
+  deathlog.rollback:
+    description: Permite restaurar inventarios
+    default: op
+  
+  deathlog.admin:
+    description: Acceso completo al plugin
+    default: op

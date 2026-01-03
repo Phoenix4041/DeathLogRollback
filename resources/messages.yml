@@ -1,0 +1,66 @@
+# DeathLogRollback Messages Configuration
+
+prefix: "§8[§eDeathLog§8]"
+
+death:
+  recorded: "{prefix} §aDeath registered with ID: §e{id}"
+  coordinates: "{prefix} §7Location: §fX: {x}, Y: {y}, Z: {z}"
+
+rollback:
+  success: "{prefix} §aInventory restored successfully (ID: §e{id}§a)"
+  restored_notification: "{prefix} §aYour inventory has been restored by §e{admin}"
+  processing: "{prefix} §7Processing rollback for ID: §e{id}§7..."
+  
+errors:
+  permission_denied: "{prefix} §cYou don't have permission to execute this command"
+  player_only: "{prefix} §cThis command can only be used by players"
+  player_not_found: "{prefix} §cPlayer not found: §e{player}"
+  player_offline: "{prefix} §cThe target player must be online to execute rollback"
+  no_deaths: "{prefix} §eNo death records found for §6{player}"
+  record_not_found: "{prefix} §cNo death record found with ID: §e{id}"
+  invalid_id: "{prefix} §cInvalid ID. Must be a number greater than 0"
+  empty_input: "{prefix} §cYou must enter a value"
+  deserialization_failed: "{prefix} §cError restoring items. Contact an administrator"
+
+forms:
+  main_menu:
+    title: "§l§8DeathLog Rollback"
+    content: "§7Select an option:"
+    button_view: "§l§eView Records\n§r§7Search History"
+    button_rollback: "§l§aRestore Inventory\n§r§7Rollback"
+  
+  search_player:
+    title: "§l§8Search History"
+    input_label: "§7Player name:"
+    input_placeholder: "Example: Steve"
+  
+  death_list:
+    title: "§l§8History: {player}"
+    content: "§7Total records: §e{count}"
+    button_format: "§l§eID: {id}\n§r§7{date}"
+    no_records_title: "§l§8Death History"
+    no_records_content: "§e{player} has no death records"
+    error_title: "§l§cError"
+    error_content: "§cPlayer not found: {player}"
+    close_button: "§cClose"
+  
+  death_details:
+    title: "§l§8Death Details"
+    format: "§l§eGlobal ID: §r§f{id}\n\n§l§eDate: §r§7{date}\n\n§l§eCoordinates:\n§7X: §f{x} §7Y: §f{y} §7Z: §f{z}\n§7World: §f{world}\n\n§l§eCause: §r§7{cause}"
+    button_back: "§aBack to History"
+    button_close: "§cClose"
+  
+  rollback_id:
+    title: "§l§8Restore Inventory"
+    input_label: "§7Global death ID:"
+    input_placeholder: "Example: 123"
+
+logging:
+  rollback_logged: "§a[LogManager] Rollback logged: {log_id} - {admin} restored {player}'s inventory (Death ID: {death_id})"
+  data_saved: "§a[DataManager] All data saved successfully"
+  record_deleted: "§a[DataManager] Record ID {id} deleted from UUID: {uuid}"
+  purge_complete: "§a[DeathLog] Old death records purged successfully ({count} records)"
+
+system:
+  plugin_enabled: "§a[DeathLogRollback] Plugin enabled successfully"
+  plugin_disabled: "§c[DeathLogRollback] Plugin disabled"
