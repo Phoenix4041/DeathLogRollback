@@ -1,4 +1,4 @@
-# DeathLogRollback Messages Configuration
+# DeathLogRollback Messages Configuration v2.1
 
 prefix: "§8[§eDeathLog§8]"
 
@@ -21,6 +21,10 @@ errors:
   invalid_id: "{prefix} §cInvalid ID. Must be a number greater than 0"
   empty_input: "{prefix} §cYou must enter a value"
   deserialization_failed: "{prefix} §cError restoring items. Contact an administrator"
+  rollback_in_progress: "{prefix} §cA rollback is already in progress for this player"
+  server_busy: "{prefix} §cServer is processing too many rollbacks. Try again later"
+  invalid_uuid_data: "{prefix} §cCorrupt death record data. Contact an administrator"
+  unexpected_error: "{prefix} §cAn unexpected error occurred. Check console logs"
 
 forms:
   main_menu:
@@ -64,3 +68,6 @@ logging:
 system:
   plugin_enabled: "§a[DeathLogRollback] Plugin enabled successfully"
   plugin_disabled: "§c[DeathLogRollback] Plugin disabled"
+
+rollback_cooldown: "{prefix} §cPlease wait {seconds} seconds before another rollback"
+death_spam_blocked: "{prefix} §cDeath recording on cooldown to prevent spam"

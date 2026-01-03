@@ -6,18 +6,22 @@ namespace Phoenix4041\DeathLogRollback\listener;
 
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerDeathEvent;
-use pocketmine\event\entity\ItemSpawnEvent;
-use pocketmine\event\entity\EntityItemPickupEvent;
 use Phoenix4041\DeathLogRollback\Loader;
 use Phoenix4041\DeathLogRollback\utils\ItemSerializer;
-use pocketmine\player\Player;
 
 class PlayerListener implements Listener {
 
     private Loader $plugin;
+    private array $deathCooldowns = [];
+    private bool $spamProtectionEnabled;
+    private int $cooldownTime;
+    private bool $debugEnabled;
 
     public function __construct(Loader $plugin) {
         $this->plugin = $plugin;
+        $this->spamProtectionEnabled = $plugin->getConfigValue("rate_limiting.enable_death_spam_protection", true);
+        $this->cooldownTime = $plugin->getConfigValue("rate_limiting.death_record_cooldown", 5);
+        $this->debugEnabled = $plugin->getConfigValue("debug.enabled", false);
     }
 
     public function onPlayerDeath(PlayerDeathEvent $event): void {
@@ -25,39 +29,15 @@ class PlayerListener implements Listener {
         $playerName = $player->getName();
         $playerUUID = $player->getUniqueId()->toString();
 
-        $cause = $player->getLastDamageCause();
-        $killerUuid = null;
-        $killerName = null;
-
-        // Detecta al asesino si fue PvP
-        if ($cause instanceof \pocketmine\event\entity\EntityDamageByEntityEvent) {
-            $damager = $cause->getDamager();
-            if ($damager instanceof Player) {
-                $killerUuid = $damager->getUniqueId()->toString();
-                $killerName = $damager->getName();
-            }
+        if ($this->spamProtectionEnabled && $this->isOnCooldown($playerUUID)) {
+            $this->debugLog("Death recording blocked for {$playerName} (cooldown active)");
+            $player->sendMessage($this->plugin->getMessage("death_spam_blocked"));
+            return;
         }
 
-        $drops = $event->getDrops();
-        
-        if (count($drops) === 0 && !$event->getKeepInventory()) {
-            $forcedDrops = [];
-            
-            foreach ($player->getInventory()->getContents() as $item) {
-                if (!$item->isNull()) {
-                    $forcedDrops[] = clone $item;
-                }
-            }
-            
-            foreach ($player->getArmorInventory()->getContents() as $item) {
-                if (!$item->isNull()) {
-                    $forcedDrops[] = clone $item;
-                }
-            }
-            
-            if (!empty($forcedDrops)) {
-                $event->setDrops($forcedDrops);
-            }
+        if ($player->isCreative()) {
+            $this->debugLog("Death recording skipped for {$playerName} (creative mode)");
+            return;
         }
 
         $inventory = [];
@@ -65,10 +45,12 @@ class PlayerListener implements Listener {
 
         if ($this->plugin->getConfigValue("save_inventory", true)) {
             $inventory = ItemSerializer::serializeInventory($player->getInventory());
+            $this->debugLog("Serialized {$playerName}'s inventory: " . count($inventory) . " items");
         }
 
         if ($this->plugin->getConfigValue("save_armor", true)) {
             $armor = ItemSerializer::serializeArmor($player->getArmorInventory());
+            $this->debugLog("Serialized {$playerName}'s armor");
         }
 
         $position = $player->getPosition();
@@ -82,83 +64,74 @@ class PlayerListener implements Listener {
                 "world" => $position->getWorld()->getFolderName()
             ],
             "cause" => $event->getDeathMessage()->getText(),
-            "killer" => $killerName,
-            "timestamp" => time(),
-            "death_time" => microtime(true)
+            "timestamp" => time()
         ];
 
-        $deathId = $this->plugin->getDataManager()->addDeathRecord(
-            $playerName,
-            $playerUUID,
-            $deathData
-        );
-
-        // CLAVE: Trackea la muerte y marca al asesino como sospechoso
-        $this->plugin->getDeathTracker()->trackDeath($playerUUID, $deathId, $deathData, $killerUuid);
-
-        if ($this->plugin->getConfigValue("logging.log_local_enabled", true)) {
-            $killerInfo = $killerName ? " by {$killerName}" : "";
-            $this->plugin->getLogger()->info(
-                "Death recorded: {$playerName} (ID: {$deathId}){$killerInfo} at " .
-                "{$deathData['coords']['x']}, {$deathData['coords']['y']}, {$deathData['coords']['z']}"
+        try {
+            $deathId = $this->plugin->getDataManager()->addDeathRecord(
+                $playerName,
+                $playerUUID,
+                $deathData
             );
-        }
 
-        $player->sendMessage($this->plugin->getMessage("death.recorded", ["id" => $deathId]));
+            if ($this->spamProtectionEnabled) {
+                $this->setCooldown($playerUUID);
+            }
+
+            if ($this->plugin->getConfigValue("logging.log_local_enabled", true)) {
+                $this->plugin->getLogger()->info(
+                    "Death recorded: {$playerName} (ID: {$deathId}) at " .
+                    "{$deathData['coords']['x']}, {$deathData['coords']['y']}, {$deathData['coords']['z']}"
+                );
+            }
+
+            $player->sendMessage($this->plugin->getMessage("death.recorded", ["id" => $deathId]));
+            $player->sendMessage($this->plugin->getMessage("death.coordinates", [
+                "x" => $deathData['coords']['x'],
+                "y" => $deathData['coords']['y'],
+                "z" => $deathData['coords']['z']
+            ]));
+
+            $this->debugLog("Successfully recorded death for {$playerName} with ID {$deathId}");
+        } catch (\Exception $e) {
+            $this->plugin->getLogger()->error("Failed to record death for {$playerName}: " . $e->getMessage());
+            $this->debugLog("Death recording exception: " . $e->getMessage());
+        }
     }
 
-    public function onItemSpawn(ItemSpawnEvent $event): void {
-        $item = $event->getEntity();
-        $position = $item->getPosition();
-        
-        // DEBUG: Log cuando un item aparece
-        $this->plugin->getLogger()->info("§b[DEBUG-SPAWN] Item spawned: " . 
-            $item->getItem()->getName() . " x" . $item->getItem()->getCount() . 
-            " at (" . round($position->x, 1) . ", " . round($position->y, 1) . ", " . round($position->z, 1) . ")");
-        
-        $this->plugin->getDeathTracker()->registerDroppedItem(
-            $item,
-            $position,
-            microtime(true)
-        );
+    private function isOnCooldown(string $uuid): bool {
+        if (!isset($this->deathCooldowns[$uuid])) {
+            return false;
+        }
+
+        return (time() - $this->deathCooldowns[$uuid]) < $this->cooldownTime;
     }
 
-    public function onItemPickup(EntityItemPickupEvent $event): void {
-        $entity = $event->getEntity();
-        
-        // DEBUG: Log de TODO pickup (incluso si no es jugador)
-        $this->plugin->getLogger()->info("§d[DEBUG-PICKUP] EntityItemPickupEvent triggered!");
-        
-        if (!($entity instanceof Player)) {
-            $this->plugin->getLogger()->info("§d[DEBUG-PICKUP] Entity is not a player, ignoring");
-            return;
-        }
+    private function setCooldown(string $uuid): void {
+        $this->deathCooldowns[$uuid] = time();
+    }
 
-        $player = $entity;
-        $itemEntity = $event->getOrigin(); // La ItemEntity que se recogió
+    public function cleanupExpiredCooldowns(): int {
+        $cleaned = 0;
+        $now = time();
         
-        // DEBUG: Verificar que getOrigin() funciona
-        if ($itemEntity === null) {
-            $this->plugin->getLogger()->error("§c[DEBUG-PICKUP] ERROR: getOrigin() returned null!");
-            return;
+        foreach ($this->deathCooldowns as $uuid => $timestamp) {
+            if (($now - $timestamp) > ($this->cooldownTime + 60)) {
+                unset($this->deathCooldowns[$uuid]);
+                $cleaned++;
+            }
         }
         
-        $pickedItem = $itemEntity->getItem(); // El Item dentro de la entity
+        if ($cleaned > 0) {
+            $this->debugLog("Cleaned up {$cleaned} expired death cooldowns");
+        }
         
-        // DEBUG: Info detallada del item recogido
-        $this->plugin->getLogger()->info("§d[DEBUG-PICKUP] Player " . $player->getName() . 
-            " picked up: " . $pickedItem->getName() . " x" . $pickedItem->getCount() . 
-            " (TypeID: " . $pickedItem->getTypeId() . ")");
-        
-        $playerUuid = $player->getUniqueId()->toString();
+        return $cleaned;
+    }
 
-        // Pasamos el Item y el tiempo al tracker
-        $this->plugin->getDeathTracker()->trackItemPickup(
-            $playerUuid, 
-            $pickedItem, 
-            microtime(true)
-        );
-        
-        $this->plugin->getLogger()->info("§d[DEBUG-PICKUP] trackItemPickup() called successfully");
+    private function debugLog(string $message): void {
+        if ($this->debugEnabled) {
+            $this->plugin->getLogger()->debug("[PlayerListener] " . $message);
+        }
     }
 }

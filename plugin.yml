@@ -1,6 +1,6 @@
 name: DeathLogRollback
 main: Phoenix4041\DeathLogRollback\Loader
-version: 2.1.0
+version: 2.4.0
 api: 5.0.0
 author: Phoenix4041
 description: Sistema de registro y rollback de inventario al morir con IDs globales y ring buffer.

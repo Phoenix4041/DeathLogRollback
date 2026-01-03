@@ -1,4 +1,4 @@
-# DeathLogRollback Configuration v2.0
+# DeathLogRollback Configuration v2.1
 
 max_records_per_player: 10
 
@@ -10,15 +10,42 @@ save_armor: true
 
 save_inventory: true
 
+debug:
+  enabled: false
+  log_cache_stats: false
+  log_item_operations: false
+  log_rollback_steps: false
+
+performance:
+  cache_enabled: true
+  cache_max_size: 100
+  async_webhooks: true
+  compress_large_inventories: false
+
+anti_dupe:
+  enabled: true
+  clear_ground_items: true
+  clear_nearby_players: true
+  clear_nearby_containers: true
+  ground_clear_radius: 15
+  verification_delay_ticks: 20
+  max_concurrent_rollbacks: 3
+
+rate_limiting:
+  death_record_cooldown: 5
+  rollback_cooldown: 10
+  enable_death_spam_protection: true
+
+rollback_behavior:
+  clear_inventory_before_restore: true
+  drop_excess_items: true
+  restore_to_death_location: false
+  notify_target_player: true
+
 logging:
   webhook_enabled: false
   webhook_url: ""
   log_local_enabled: true
-
-messages:
-  death_recorded: "§a[DeathLog] Death registered with ID: §e{id}"
-  rollback_success: "§a[DeathLog] Inventory restored successfully (ID: {id})"
-  rollback_error: "§c[DeathLog] Could not restore inventory"
-  no_deaths: "§e[DeathLog] No death records found"
-  permission_denied: "§c[DeathLog] You don't have permission to execute this command"
-  purge_complete: "§a[DeathLog] Old death records purged successfully"
+  structured_logging: true
+  log_rotation_enabled: true
+  max_log_file_size_mb: 10
