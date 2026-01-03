@@ -30,7 +30,7 @@ class Loader extends PluginBase {
     private DataManager $dataManager;
     private RollbackManager $rollbackManager;
     private LogManager $logManager;
-    private DeathTracker $deathTracker; // FIX: Agregar propiedad
+    private DeathTracker $deathTracker;
     private MessageManager $messageManager;
     private array $config;
     private array $messages;
@@ -51,7 +51,7 @@ class Loader extends PluginBase {
         @mkdir($this->getDataFolder() . "data");
 
         $this->dataManager = new DataManager($this);
-        $this->deathTracker = new DeathTracker($this); // FIX: Inicializar DeathTracker
+        $this->deathTracker = new DeathTracker($this);
         $this->rollbackManager = new RollbackManager($this);
         $this->logManager = new LogManager($this);
 
@@ -60,7 +60,6 @@ class Loader extends PluginBase {
         $purgeInterval = $this->parsePurgeInterval($this->config["purge_interval"] ?? "7d");
         $this->getScheduler()->scheduleRepeatingTask(new PurgeTask($this), $purgeInterval * 20);
 
-        $this->getLogger()->info("§a[DeathLogRollback] Plugin enabled successfully");
     }
 
     protected function onDisable(): void {
@@ -130,7 +129,6 @@ class Loader extends PluginBase {
         return $this->logManager;
     }
 
-    // FIX: Agregar método getter para DeathTracker
     public function getDeathTracker(): DeathTracker {
         return $this->deathTracker;
     }

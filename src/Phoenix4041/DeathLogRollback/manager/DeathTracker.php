@@ -16,15 +16,12 @@ class DeathTracker {
     private array $trackedDeaths = [];
     private array $droppedItems = [];
     private array $itemOwnership = [];
-    private const TRACK_TIME_WINDOW = 600; // 10 minutos
+    private const TRACK_TIME_WINDOW = 600; // 10 minutes
 
     public function __construct(Loader $plugin) {
         $this->plugin = $plugin;
     }
 
-    /**
-     * Registra una muerte y marca al asesino como sospechoso principal
-     */
     public function trackDeath(string $victimUuid, int $deathId, array $deathData, ?string $killerUuid = null): void {
         $this->trackedDeaths[$deathId] = [
             'victim_uuid' => $victimUuid,
@@ -35,7 +32,6 @@ class DeathTracker {
             'suspects' => []
         ];
 
-        // Si hay asesino, es el sospechoso #1
         if ($killerUuid !== null) {
             $this->trackedDeaths[$deathId]['suspects'][$killerUuid] = [
                 'reason' => 'killer',
@@ -51,11 +47,7 @@ class DeathTracker {
         $this->cleanOldTracking();
     }
 
-    /**
-     * Crea un ID único basado en las propiedades del item
-     */
     private function createItemHash(Item $item, Vector3 $position, float $spawnTime): string {
-        // Usa: tipo + cantidad + posición + tiempo para crear un hash único
         $data = $item->getTypeId() . "_" . 
                 $item->getCount() . "_" . 
                 round($position->x, 2) . "_" . 
@@ -66,11 +58,7 @@ class DeathTracker {
         return md5($data);
     }
 
-    /**
-     * Crea un hash del item recogido para matching
-     */
     private function createPickupHash(Item $item, float $pickupTime, int $deathId): string {
-        // Busca en un radio de tiempo cercano
         $timeWindow = round($pickupTime, 1); // 100ms de ventana
         
         $data = $item->getTypeId() . "_" . 
@@ -81,9 +69,6 @@ class DeathTracker {
         return md5($data);
     }
 
-    /**
-     * Registra un item dropeado cerca de una muerte
-     */
     public function registerDroppedItem(ItemEntity $itemEntity, Vector3 $position, float $spawnTime): void {
         $item = $itemEntity->getItem();
         
@@ -105,13 +90,12 @@ class DeathTracker {
             $this->plugin->getLogger()->info("§6[DEBUG-REGISTER] Death #{$deathId}: " .
                 "TimeDiff=" . round($timeDiff, 2) . "s, Distance=" . round($distance, 1) . " blocks");
 
-            // Ventana de 2 segundos y 16 bloques de distancia
             if ($timeDiff <= 2.0 && $distance <= 16) {
                 $itemHash = $this->createItemHash($item, $position, $spawnTime);
                 
                 $this->trackedDeaths[$deathId]['tracked_items'][$itemHash] = [
                     'entity' => $itemEntity,
-                    'item' => clone $item, // Guardamos copia del item
+                    'item' => clone $item,
                     'position' => $position,
                     'spawn_time' => $spawnTime,
                     'picked_by' => null,
@@ -135,53 +119,42 @@ class DeathTracker {
         }
     }
 
-    /**
-     * Registra cuando un jugador recoge un item de una muerte
-     * MEJORADO: Busca por similitud de item en lugar de entity ID
-     */
     public function trackItemPickup(string $playerUuid, Item $pickedItem, float $pickupTime): void {
         $matched = false;
         
         $this->plugin->getLogger()->info("§e[DEBUG-TRACK] trackItemPickup called for item: " . 
             $pickedItem->getName() . " x" . $pickedItem->getCount() . 
             " | Tracked deaths: " . count($this->trackedDeaths));
-        
-        // Busca en todas las muertes trackeadas
+
         foreach ($this->trackedDeaths as $deathId => $deathInfo) {
             $timeSinceDeath = microtime(true) - $deathInfo['timestamp'];
             
             $this->plugin->getLogger()->info("§e[DEBUG-TRACK] Checking death #{$deathId}: " .
                 "Time since death=" . round($timeSinceDeath, 1) . "s, " .
                 "Tracked items=" . count($deathInfo['tracked_items']));
-            
-            // Solo busca en muertes recientes (últimos 30 segundos)
+
             if ($timeSinceDeath > 30) {
                 $this->plugin->getLogger()->info("§e[DEBUG-TRACK] Death #{$deathId} too old, skipping");
                 continue;
             }
-            
-            // Busca items similares en esta muerte
+
             foreach ($deathInfo['tracked_items'] as $itemHash => $itemData) {
                 $this->plugin->getLogger()->info("§e[DEBUG-TRACK] Comparing with tracked item: " .
                     "TypeID={$itemData['type_id']}, Count={$itemData['count']}, PickedBy=" . 
                     ($itemData['picked_by'] ?? 'null'));
-                
-                // Si ya fue recogido, skip
+
                 if ($itemData['picked_by'] !== null) {
                     $this->plugin->getLogger()->info("§e[DEBUG-TRACK] Item already picked, skipping");
                     continue;
                 }
-                
-                // Verifica si el item es similar
+
                 if ($itemData['type_id'] === $pickedItem->getTypeId() && 
                     $itemData['count'] === $pickedItem->getCount()) {
                     
-                    $this->plugin->getLogger()->info("§a[DEBUG-TRACK] ✓ MATCH FOUND!");
-                    
-                    // MATCH! Marca como recogido
+                    $this->plugin->getLogger()->info("§a[DEBUG-TRACK]  MATCH FOUND!");
+
                     $this->trackedDeaths[$deathId]['tracked_items'][$itemHash]['picked_by'] = $playerUuid;
-                    
-                    // Agrega al jugador como sospechoso si no lo es ya
+
                     if (!isset($this->trackedDeaths[$deathId]['suspects'][$playerUuid])) {
                         $this->trackedDeaths[$deathId]['suspects'][$playerUuid] = [
                             'reason' => 'picked_items',
@@ -194,11 +167,9 @@ class DeathTracker {
                                 $pickedItem->getName() . " x" . $pickedItem->getCount() . " from death #{$deathId}");
                         }
                     }
-                    
-                    // Registra qué item específico recogió
+
                     $this->trackedDeaths[$deathId]['suspects'][$playerUuid]['picked_items'][] = $itemHash;
-                    
-                    // Mantiene registro de propiedad
+
                     if (!isset($this->itemOwnership[$playerUuid])) {
                         $this->itemOwnership[$playerUuid] = [];
                     }
@@ -210,7 +181,7 @@ class DeathTracker {
                     ];
                     
                     $matched = true;
-                    break 2; // Sale de ambos loops
+                    break 2;
                 }
             }
         }
@@ -222,23 +193,14 @@ class DeathTracker {
         }
     }
 
-    /**
-     * Obtiene la lista de sospechosos para una muerte específica
-     */
     public function getSuspectsForDeath(int $deathId): array {
         return $this->trackedDeaths[$deathId]['suspects'] ?? [];
     }
 
-    /**
-     * Obtiene todos los items trackeados de una muerte
-     */
     public function getTrackedItemsForDeath(int $deathId): array {
         return $this->trackedDeaths[$deathId]['tracked_items'] ?? [];
     }
 
-    /**
-     * Verifica si un jugador es sospechoso
-     */
     public function isPlayerSuspect(string $playerUuid, int $deathId): bool {
         if (!isset($this->trackedDeaths[$deathId])) {
             return false;
@@ -247,9 +209,6 @@ class DeathTracker {
         return isset($this->trackedDeaths[$deathId]['suspects'][$playerUuid]);
     }
 
-    /**
-     * Obtiene todas las muertes donde un jugador es sospechoso
-     */
     public function getDeathIdsByPlayer(string $playerUuid): array {
         $deathIds = [];
         
@@ -262,17 +221,12 @@ class DeathTracker {
         return $deathIds;
     }
 
-    /**
-     * Deja de trackear una muerte (después del rollback)
-     */
     public function untrackDeath(int $deathId): void {
         if (isset($this->trackedDeaths[$deathId])) {
-            // Limpia items dropeados
             foreach ($this->trackedDeaths[$deathId]['tracked_items'] as $itemHash => $itemData) {
                 unset($this->droppedItems[$itemHash]);
             }
 
-            // Limpia ownership de sospechosos
             foreach ($this->trackedDeaths[$deathId]['suspects'] as $suspectUuid => $suspectData) {
                 if (isset($this->itemOwnership[$suspectUuid])) {
                     $this->itemOwnership[$suspectUuid] = array_filter(
@@ -291,9 +245,6 @@ class DeathTracker {
         }
     }
 
-    /**
-     * Limpia tracking antiguo (más de 10 minutos)
-     */
     private function cleanOldTracking(): void {
         $currentTime = microtime(true);
         

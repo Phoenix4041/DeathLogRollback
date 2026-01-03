@@ -8,8 +8,6 @@ use pocketmine\player\Player;
 use pocketmine\entity\object\ItemEntity;
 use pocketmine\math\Vector3;
 use pocketmine\math\AxisAlignedBB;
-use pocketmine\block\tile\Chest;
-use pocketmine\block\tile\EnderChest;
 use pocketmine\item\Item;
 use Phoenix4041\DeathLogRollback\Loader;
 use Phoenix4041\DeathLogRollback\utils\ItemSerializer;
@@ -82,34 +80,19 @@ class RollbackManager {
 
         $this->debugLog("Starting rollback for player {$targetPlayer->getName()} (ID: {$globalId})");
 
-        if ($this->plugin->getConfigValue("anti_dupe.clear_ground_items", true)) {
-            $this->removeLootFromGround($deathCoords);
-        }
-
-        if ($this->plugin->getConfigValue("anti_dupe.clear_nearby_players", true)) {
-            $this->clearNearbyPlayersInventories($deathCoords);
-        }
-
-        if ($this->plugin->getConfigValue("anti_dupe.clear_nearby_containers", true)) {
-            $this->clearNearbyContainers($deathCoords);
-        }
-
-        $clearInventoryBeforeRestore = $this->plugin->getConfigValue("rollback_behavior.clear_inventory_before_restore", true);
-        
-        if ($clearInventoryBeforeRestore) {
-            $this->clearAllPlayerInventories($targetPlayer);
-            $this->debugLog("Cleared {$targetPlayer->getName()}'s inventories before restore (config enabled)");
-        }
-
-        $delay = $this->plugin->getConfigValue("anti_dupe.verification_delay_ticks", 20););
-        
-        if ($clearInventoryBeforeRestore) {
-            $this->clearAllPlayerInventories($targetPlayer);
-            $this->debugLog("Cleared {$targetPlayer->getName()}'s inventories before restore (config enabled)");
-        }
+        $this->clearAllPlayerInventories($targetPlayer);
+        $this->debugLog("Cleared {$targetPlayer->getName()}'s inventories to prevent duplication");
 
         if ($this->plugin->getConfigValue("anti_dupe.clear_ground_items", true)) {
             $this->removeLootFromGround($deathCoords, $deathData);
+        }
+
+        if ($this->plugin->getConfigValue("anti_dupe.clear_nearby_players", true)) {
+            $this->clearNearbyPlayersInventories($deathCoords, $deathData);
+        }
+
+        if ($this->plugin->getConfigValue("anti_dupe.clear_nearby_containers", true)) {
+            $this->clearNearbyContainers($deathCoords, $deathData);
         }
 
         $delay = $this->plugin->getConfigValue("anti_dupe.verification_delay_ticks", 20);
@@ -217,59 +200,114 @@ class RollbackManager {
 
             $removedItemEntities = 0;
             
-            if ($this->plugin->getConfigValue("anti_dupe.clear_ground_items", true)) {
-                foreach ($world->getEntities() as $entity) {
-                    if ($entity instanceof ItemEntity) {
-                        $entityPos = $entity->getPosition();
-                        if ($bb->isVectorInside($entityPos->asVector3())) {
-                            $item = $entity->getItem();
-                            if ($this->isItemFromDeath($item, $deathItemsSignature)) {
-                                $entity->flagForDespawn();
-                                $entity->close();
-                                $removedItemEntities++;
-                                $this->debugLog("Removed ground item: {$item->getName()} x{$item->getCount()}");
-                            }
+            foreach ($world->getEntities() as $entity) {
+                if ($entity instanceof ItemEntity) {
+                    $entityPos = $entity->getPosition();
+                    if ($bb->isVectorInside($entityPos->asVector3())) {
+                        $item = $entity->getItem();
+                        if ($this->isItemFromDeath($item, $deathItemsSignature)) {
+                            $entity->flagForDespawn();
+                            $entity->close();
+                            $removedItemEntities++;
+                            $this->debugLog("Removed ground item: {$item->getName()} x{$item->getCount()}");
                         }
                     }
                 }
             }
 
+            $this->debugLog("Anti-Dupe Ground Clearing Complete: {$removedItemEntities} items removed");
+
+        } catch (\Exception $e) {
+            $this->plugin->getLogger()->warning("Failed to remove loot: " . $e->getMessage());
+            $this->debugLog("Ground clearing exception: " . $e->getMessage());
+        }
+    }
+
+    private function clearNearbyPlayersInventories(array $coords, array $deathData): void {
+        try {
+            $worldManager = $this->plugin->getServer()->getWorldManager();
+            $world = $worldManager->getWorldByName($coords["world"]);
+
+            if ($world === null) {
+                return;
+            }
+
+            $deathPos = new Vector3($coords["x"], $coords["y"], $coords["z"]);
+            $radius = $this->plugin->getConfigValue("anti_dupe.ground_clear_radius", 15);
+
+            $bb = new AxisAlignedBB(
+                $deathPos->x - $radius,
+                $deathPos->y - $radius,
+                $deathPos->z - $radius,
+                $deathPos->x + $radius,
+                $deathPos->y + $radius,
+                $deathPos->z + $radius
+            );
+
+            $deathItemsSignature = $this->buildItemSignature($deathData);
             $clearedItems = 0;
-            if ($this->plugin->getConfigValue("anti_dupe.clear_nearby_players", true)) {
-                foreach ($world->getPlayers() as $nearbyPlayer) {
-                    $playerPos = $nearbyPlayer->getPosition();
-                    if ($bb->isVectorInside($playerPos->asVector3())) {
-                        $removed = $this->removeMatchingItems($nearbyPlayer, $deathItemsSignature);
-                        if ($removed > 0) {
-                            $clearedItems += $removed;
-                            $this->debugLog("Removed {$removed} matching items from {$nearbyPlayer->getName()}");
-                        }
+
+            foreach ($world->getPlayers() as $nearbyPlayer) {
+                $playerPos = $nearbyPlayer->getPosition();
+                if ($bb->isVectorInside($playerPos->asVector3())) {
+                    $removed = $this->removeMatchingItems($nearbyPlayer, $deathItemsSignature);
+                    if ($removed > 0) {
+                        $clearedItems += $removed;
+                        $this->debugLog("Removed {$removed} matching items from {$nearbyPlayer->getName()}");
                     }
                 }
             }
 
-            $clearedFromContainers = 0;
-            if ($this->plugin->getConfigValue("anti_dupe.clear_nearby_containers", true)) {
-                $minX = (int)floor($bb->minX);
-                $maxX = (int)ceil($bb->maxX);
-                $minY = (int)floor($bb->minY);
-                $maxY = (int)ceil($bb->maxY);
-                $minZ = (int)floor($bb->minZ);
-                $maxZ = (int)ceil($bb->maxZ);
+            $this->debugLog("Anti-Dupe Player Clearing Complete: {$clearedItems} items removed");
 
-                for ($x = $minX; $x <= $maxX; $x++) {
-                    for ($y = $minY; $y <= $maxY; $y++) {
-                        for ($z = $minZ; $z <= $maxZ; $z++) {
-                            $tile = $world->getTileAt($x, $y, $z);
-                            
-                            if ($tile !== null && method_exists($tile, 'getInventory')) {
-                                $inventory = $tile->getInventory();
-                                if ($inventory !== null) {
-                                    $removed = $this->removeMatchingItemsFromInventory($inventory, $deathItemsSignature);
-                                    if ($removed > 0) {
-                                        $clearedFromContainers += $removed;
-                                        $this->debugLog("Removed {$removed} items from container at {$x}, {$y}, {$z}");
-                                    }
+        } catch (\Exception $e) {
+            $this->plugin->getLogger()->warning("Failed to clear nearby players: " . $e->getMessage());
+        }
+    }
+
+    private function clearNearbyContainers(array $coords, array $deathData): void {
+        try {
+            $worldManager = $this->plugin->getServer()->getWorldManager();
+            $world = $worldManager->getWorldByName($coords["world"]);
+
+            if ($world === null) {
+                return;
+            }
+
+            $deathPos = new Vector3($coords["x"], $coords["y"], $coords["z"]);
+            $radius = $this->plugin->getConfigValue("anti_dupe.ground_clear_radius", 15);
+
+            $bb = new AxisAlignedBB(
+                $deathPos->x - $radius,
+                $deathPos->y - $radius,
+                $deathPos->z - $radius,
+                $deathPos->x + $radius,
+                $deathPos->y + $radius,
+                $deathPos->z + $radius
+            );
+
+            $deathItemsSignature = $this->buildItemSignature($deathData);
+            $clearedFromContainers = 0;
+
+            $minX = (int)floor($bb->minX);
+            $maxX = (int)ceil($bb->maxX);
+            $minY = (int)floor($bb->minY);
+            $maxY = (int)ceil($bb->maxY);
+            $minZ = (int)floor($bb->minZ);
+            $maxZ = (int)ceil($bb->maxZ);
+
+            for ($x = $minX; $x <= $maxX; $x++) {
+                for ($y = $minY; $y <= $maxY; $y++) {
+                    for ($z = $minZ; $z <= $maxZ; $z++) {
+                        $tile = $world->getTileAt($x, $y, $z);
+                        
+                        if ($tile !== null && method_exists($tile, 'getInventory')) {
+                            $inventory = $tile->getInventory();
+                            if ($inventory !== null) {
+                                $removed = $this->removeMatchingItemsFromInventory($inventory, $deathItemsSignature);
+                                if ($removed > 0) {
+                                    $clearedFromContainers += $removed;
+                                    $this->debugLog("Removed {$removed} items from container at {$x}, {$y}, {$z}");
                                 }
                             }
                         }
@@ -277,11 +315,10 @@ class RollbackManager {
                 }
             }
 
-            $this->debugLog("Anti-Dupe Complete: {$removedItemEntities} ground items, {$clearedItems} player items, {$clearedFromContainers} container items");
+            $this->debugLog("Anti-Dupe Container Clearing Complete: {$clearedFromContainers} items removed");
 
         } catch (\Exception $e) {
-            $this->plugin->getLogger()->warning("Failed to remove loot: " . $e->getMessage());
-            $this->debugLog("Ground clearing exception: " . $e->getMessage());
+            $this->plugin->getLogger()->warning("Failed to clear nearby containers: " . $e->getMessage());
         }
     }
 
@@ -322,15 +359,13 @@ class RollbackManager {
     }
 
     private function getItemKey(Item $item): string {
-        $nbtHash = "";
         try {
             $nbt = $item->nbtSerialize();
             $nbtHash = md5($nbt->toString());
+            return $item->getTypeId() . ":" . $item->getStateId() . ":" . $nbtHash;
         } catch (\Exception $e) {
-            $nbtHash = "no_nbt";
+            return $item->getTypeId() . ":" . $item->getStateId() . ":no_nbt";
         }
-        
-        return $item->getTypeId() . ":" . $item->getStateId() . ":" . $nbtHash;
     }
 
     private function isItemFromDeath(Item $item, array $signature): bool {
@@ -386,90 +421,83 @@ class RollbackManager {
     }
 
     private function restoreInventory(Player $player, array $deathData): bool {
-        $inventory = $player->getInventory();
-        $armorInventory = $player->getArmorInventory();
-        $dropExcess = $this->plugin->getConfigValue("rollback_behavior.drop_excess_items", true);
-        $dropLocation = $this->plugin->getConfigValue("rollback_behavior.restore_to_death_location", false) 
-            ? $this->getDeathLocation($deathData) 
-            : $player->getPosition();
-
         try {
+            $inventory = $player->getInventory();
+            $armorInventory = $player->getArmorInventory();
+            
+            // CRITICAL: Clear ALL inventories including ender and cursor
+            $inventory->clearAll();
+            $armorInventory->clearAll();
+            $player->getEnderInventory()->clearAll();
+            $player->getCursorInventory()->clearAll();
+            
+            $this->debugLog("FORCED CLEAR: All inventories cleared for {$player->getName()}");
+            
             $restoredItems = 0;
-            $droppedItems = 0;
+            $dropLocation = $player->getPosition();
 
-            foreach ($deathData["inventory"] as $slot => $itemData) {
-                if (empty($itemData)) continue;
-                
-                $item = ItemSerializer::deserialize($itemData);
-                
-                if ($item !== null && !$item->isNull()) {
-                    $slotNum = (int)$slot;
+            // Restore main inventory
+            if (isset($deathData["inventory"])) {
+                foreach ($deathData["inventory"] as $slot => $itemData) {
+                    if (empty($itemData)) continue;
                     
-                    $currentItem = $inventory->getItem($slotNum);
+                    $item = ItemSerializer::deserialize($itemData);
                     
-                    if ($currentItem->isNull() || $currentItem->getCount() === 0) {
-                        if ($inventory->setItem($slotNum, $item)) {
-                            $restoredItems++;
-                            $this->debugLog("Restored item to slot {$slotNum}: {$item->getName()} x{$item->getCount()}");
-                        } else {
-                            if ($dropExcess) {
-                                $player->getWorld()->dropItem($dropLocation, $item);
-                                $droppedItems++;
-                                $this->debugLog("Dropped item (failed to set): {$item->getName()}");
-                            }
-                        }
-                    } else {
-                        if ($dropExcess) {
-                            $player->getWorld()->dropItem($dropLocation, $item);
-                            $droppedItems++;
-                            $this->debugLog("Dropped item (slot occupied): {$item->getName()}");
-                        }
+                    if ($item !== null && !$item->isNull()) {
+                        $slotNum = (int)$slot;
+                        $inventory->setItem($slotNum, $item);
+                        $restoredItems++;
+                        $this->debugLog("Restored: {$item->getName()} x{$item->getCount()} to slot {$slotNum}");
                     }
                 }
             }
 
+            // Restore armor
             if (isset($deathData["armor"])) {
                 $armorData = $deathData["armor"];
                 
-                $restoreArmorSlot = function(?string $itemKey, callable $getter, callable $setter) use ($armorData, $player, $dropLocation, $dropExcess, &$restoredItems, &$droppedItems): void {
-                    if (isset($armorData[$itemKey]) && !empty($armorData[$itemKey])) {
-                        $item = ItemSerializer::deserialize($armorData[$itemKey]);
-                        if ($item !== null && !$item->isNull()) {
-                            $currentItem = $getter();
-                            
-                            if ($currentItem->isNull() || $currentItem->getCount() === 0) {
-                                if ($setter($item)) {
-                                    $restoredItems++;
-                                    $this->debugLog("Restored armor: {$itemKey}");
-                                } else {
-                                    if ($dropExcess) {
-                                        $player->getWorld()->dropItem($dropLocation, $item);
-                                        $droppedItems++;
-                                        $this->debugLog("Dropped armor (failed to equip): {$itemKey}");
-                                    }
-                                }
-                            } else {
-                                if ($dropExcess) {
-                                    $player->getWorld()->dropItem($dropLocation, $item);
-                                    $droppedItems++;
-                                    $this->debugLog("Dropped armor (slot occupied): {$itemKey}");
-                                }
-                            }
-                        }
+                if (isset($armorData["helmet"]) && !empty($armorData["helmet"])) {
+                    $item = ItemSerializer::deserialize($armorData["helmet"]);
+                    if ($item !== null && !$item->isNull()) {
+                        $armorInventory->setHelmet($item);
+                        $restoredItems++;
+                        $this->debugLog("Restored helmet");
                     }
-                };
-
-                $restoreArmorSlot("helmet", fn() => $armorInventory->getHelmet(), fn($item) => $armorInventory->setHelmet($item));
-                $restoreArmorSlot("chestplate", fn() => $armorInventory->getChestplate(), fn($item) => $armorInventory->setChestplate($item));
-                $restoreArmorSlot("leggings", fn() => $armorInventory->getLeggings(), fn($item) => $armorInventory->setLeggings($item));
-                $restoreArmorSlot("boots", fn() => $armorInventory->getBoots(), fn($item) => $armorInventory->setBoots($item));
+                }
+                
+                if (isset($armorData["chestplate"]) && !empty($armorData["chestplate"])) {
+                    $item = ItemSerializer::deserialize($armorData["chestplate"]);
+                    if ($item !== null && !$item->isNull()) {
+                        $armorInventory->setChestplate($item);
+                        $restoredItems++;
+                        $this->debugLog("Restored chestplate");
+                    }
+                }
+                
+                if (isset($armorData["leggings"]) && !empty($armorData["leggings"])) {
+                    $item = ItemSerializer::deserialize($armorData["leggings"]);
+                    if ($item !== null && !$item->isNull()) {
+                        $armorInventory->setLeggings($item);
+                        $restoredItems++;
+                        $this->debugLog("Restored leggings");
+                    }
+                }
+                
+                if (isset($armorData["boots"]) && !empty($armorData["boots"])) {
+                    $item = ItemSerializer::deserialize($armorData["boots"]);
+                    if ($item !== null && !$item->isNull()) {
+                        $armorInventory->setBoots($item);
+                        $restoredItems++;
+                        $this->debugLog("Restored boots");
+                    }
+                }
             }
 
-            $this->debugLog("Restoration complete: {$restoredItems} items restored, {$droppedItems} items dropped");
-
+            $this->debugLog("RESTORATION COMPLETE: {$restoredItems} items restored for {$player->getName()}");
             return true;
+            
         } catch (\Exception $e) {
-            $this->plugin->getLogger()->error("Failed to restore inventory for {$player->getName()}: " . $e->getMessage());
+            $this->plugin->getLogger()->error("Restore failed for {$player->getName()}: " . $e->getMessage());
             $this->debugLog("Restore exception: " . $e->getMessage());
             return false;
         }

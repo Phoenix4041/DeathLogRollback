@@ -120,7 +120,7 @@ class LogManager {
         $embed = [
             "embeds" => [
                 [
-                    "title" => "🔄 Rollback Ejecutado",
+                    "title" => "Rollback Ejecutado",
                     "color" => 3066993,
                     "fields" => [
                         [
